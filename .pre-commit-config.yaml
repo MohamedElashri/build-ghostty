@@ -1,0 +1,116 @@
+---
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+# cspell:ignore autofix shellcheck shfmt yamlfmt gitleaks unattend scrollback actionlint zizmor github
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+      # non-default
+      - id: check-case-conflict
+      - id: check-executables-have-shebangs
+        exclude: |
+          (?x)^(
+              .*\.ps1|
+              path/to/file\.py
+          )$
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-shebang-scripts-are-executable
+      - id: check-symlinks
+      - id: check-toml
+      - id: check-xml
+      - id: detect-private-key
+      - id: mixed-line-ending
+#      - id: pretty-format-json
+#        args: ["--autofix"]
+#  - repo: https://github.com/google/yamlfmt
+#    rev: v0.14.0
+#    hooks:
+#      - id: yamlfmt
+#        args: ["-formatter", "include_document_start=true,scan_folded_as_literal=true"]
+  - repo: https://github.com/koalaman/shellcheck-precommit
+    rev: v0.10.0
+    hooks:
+      - id: shellcheck
+        args: ["--color=always", "--external-sources"]
+        types: ["executable", "file", "shell", "text"]
+        exclude: |
+          (?x)^(
+              path/to/file\.py
+          )$
+  - repo: https://github.com/scop/pre-commit-shfmt
+    rev: v3.10.0-1
+    hooks:
+      - id: shfmt
+        args: ["--diff", "--indent", "2", "--binary-next-line", "--space-redirects", "--case-indent"]
+        types: ["executable", "file", "shell", "text"]
+        exclude: |
+          (?x)^(
+              path/to/file\.py
+          )$
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.4
+    hooks:
+      - id: actionlint
+  - repo: https://github.com/woodruffw/zizmor
+    rev: v0.5.0
+    hooks:
+      - id: zizmor
+        files: ^\.github/workflows/.*\.ya?ml$
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+        args: ["--no-banner"]
+#  - repo: https://github.com/amperser/proselint
+#    rev: 0.14.0
+#    hooks:
+#      - id: proselint
+#        types: ["asciidoc", "file", "non-executable", "plain-text", "text"]
+#  - repo: https://github.com/streetsidesoftware/cspell-cli
+#    rev: v8.16.0
+#    hooks:
+#      - id: cspell
+#        additional_dependencies:
+#          - "@cspell/dict-de-de"
+#          - "@cspell/dict-vim"
+#          - "@cspell/dict-win32"
+#        args:
+#          - "--locale"
+#          - "en,en-US,de-DE"
+#          - "--no-progress"
+#          - "--no-summary"
+#          # Include files and directories starting with '.' when matching
+#          # globs.
+#          - "--dot"
+#          # Show the surrounding text around an issue.
+#          - "--show-context"
+#          # Ignore files matching glob patterns found in .gitignore files.
+#          #- "--gitignore"
+#          # For easier adding of words to dictionaries.
+#          #- "--words-only"
+#          #- "--unique"
+#          # This might eventually be useful for some tricky issues.
+#          #- "--verbose"
+#          #- "--no-cache"
+#          #- "--cache-reset"
+#          # Not useful at all unless you are prepared to filter JSON output
+#          # longer than your scrollback buffer.
+#          #- "--debug"
+#        types: ["file", "text"]
+#        exclude: |
+#          (?x)^(
+#              \.gitignore|
+#              \.proselintrc\.json|
+#              .*\.cast|
+#              .*\.ini|
+#              .*\.json|
+#              .*\.ps1|
+#              .*\.svg|
+#              path/to/file\.py
+#          )$
