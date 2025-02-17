@@ -10,36 +10,40 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    
+
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      
+
       - name: Get latest release version
         id: get_version
         run: |
           LATEST_TAG=$(curl -s https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r .tag_name)
-          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          echo "latest_tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Update README
         run: |
           # Read the current README
           content=$(cat README.md)
-          
+
           # Update the version line with both the link text and URL
           # Matches the line "# Latest Version : [vX.Y.Z](https://github.com/MohamedElashri/build-ghostty/releases/tag/vX.Y.Z)"
-          new_content=$(echo "$content" | sed -E "s|# Latest Version : \[v[0-9]+\.[0-9]+\.[0-9]+\]\(https://github\.com/MohamedElashri/build-ghostty/releases/tag/v[0-9]+\.[0-9]+\.[0-9]+\)|# Latest Version : [${{ steps.get_version.outputs.latest_tag }}](https://github.com/MohamedElashri/build-ghostty/releases/tag/${{ steps.get_version.outputs.latest_tag }})|g")
-          
+          new_content=$(echo "$content" | sed -E "s|# Latest Version : \[v[0-9]+\.[0-9]+\.[0-9]+\]\(https://github\.com/MohamedElashri/build-ghostty/releases/tag/v[0-9]+\.[0-9]+\.[0-9]+\)|# Latest Version : [${LATEST_TAG}](https://github.com/MohamedElashri/build-ghostty/releases/tag/${LATEST_TAG})|g")
+
           # Write the new content back to README
           echo "$new_content" > README.md
+        env:
+          LATEST_TAG: ${{ steps.get_version.outputs.latest_tag }}
 
       - name: Commit and push if changed
         run: |
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
-          
+
           git diff
           git add README.md
-          git commit -m "docs: update version in README to ${{ steps.get_version.outputs.latest_tag }}" || exit 0
+          git commit -m "docs: update version in README to ${LATEST_TAG}" || exit 0
           git push
+        env:
+          LATEST_TAG: ${{ steps.get_version.outputs.latest_tag }}
