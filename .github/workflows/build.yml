@@ -12,17 +12,16 @@ on:
         default: ''
         type: string
 
-permissions:
-  contents: write
-
 jobs:
   check-tag:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       tag: ${{ steps.get_tag.outputs.tag }}
       version: ${{ steps.version.outputs.version }}
       should_build: ${{ steps.check_release.outputs.should_build }}
-    
+
     steps:
       - name: Get latest valid version tag
         id: get_tag
@@ -32,10 +31,10 @@ jobs:
             grep '"name":' | \
             grep -o '"v[0-9][^"]*"' | \
             tr -d '"')
-          
-          if [[ -n "${{ github.event.inputs.tag }}" ]]; then
+
+          if [[ -n "${INPUTS_TAG}" ]]; then
             # For manual tag input, check if it exists
-            TAG="${{ github.event.inputs.tag }}"
+            TAG="${INPUTS_TAG}"
             if echo "$UPSTREAM_TAGS" | grep -q "^${TAG}$"; then
               echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
             else
@@ -49,38 +48,42 @@ jobs:
             LATEST_TAG=$(echo "$UPSTREAM_TAGS" | sort -V | tail -n1)
             echo "tag=${LATEST_TAG}" >> "$GITHUB_OUTPUT"
           fi
-          
+
           # Debug output
           echo "Available tags:"
           echo "$UPSTREAM_TAGS"
-          echo "Selected tag: $(cat $GITHUB_OUTPUT)"
+          echo "Selected tag: $(cat "$GITHUB_OUTPUT")"
+        env:
+          INPUTS_TAG: ${{ steps.get_tag.outputs.tag }}
 
       - name: Set version
         id: version
         run: |
-          TAG=${{ steps.get_tag.outputs.tag }}
-          echo "version=${TAG#v}" >> $GITHUB_OUTPUT
-          echo "Version set to: $(cat $GITHUB_OUTPUT)"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "Version set to: $(cat "$GITHUB_OUTPUT")"
+        env:
+          TAG: ${{ steps.get_tag.outputs.tag }}
 
       - name: Check if build needed
         id: check_release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUTS_TAG: ${{ steps.get_tag.outputs.tag }}
+          TAG: ${{ steps.get_tag.outputs.tag }}
         run: |
-          TAG=${{ steps.get_tag.outputs.tag }}
           echo "Checking if build needed for tag: $TAG"
-          
+
           # Get all releases from this repository
           RELEASES=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
             "https://api.github.com/repos/$GITHUB_REPOSITORY/releases")
-          
+
           # Check if we have a release for this tag
           TAG_RELEASE=$(echo "$RELEASES" | jq -r ".[] | select(.tag_name==\"$TAG\")")
-          
+
           # Debug output
           echo "Checking for existing release with tag: $TAG"
-          
-          if [[ -n "${{ github.event.inputs.tag }}" ]]; then
+
+          if [[ -n "${INPUTS_TAG}" ]]; then
             echo "Manual build requested, will build regardless"
             echo "should_build=true" >> "$GITHUB_OUTPUT"
           elif [[ -z "$TAG_RELEASE" ]]; then
@@ -90,13 +93,15 @@ jobs:
             echo "Release already exists for tag $TAG, skipping build"
             echo "should_build=false" >> "$GITHUB_OUTPUT"
           fi
-          
-          echo "Final decision: $(cat $GITHUB_OUTPUT)"
+
+          echo "Final decision: $(cat "$GITHUB_OUTPUT")"
 
   build-and-package:
     needs: check-tag
     if: needs.check-tag.outputs.should_build == 'true'
     runs-on: ${{ matrix.ubuntu }}
+    permissions:
+      contents: write
     strategy:
       matrix:
         ubuntu: [ubuntu-22.04, ubuntu-24.04]
@@ -105,6 +110,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Install system dependencies
         run: |
@@ -115,19 +122,20 @@ jobs:
 
       - name: Get tagged source code
         run: |
-          TAG=${{ needs.check-tag.outputs.tag }}
           echo "Downloading source code for tag: $TAG"
-          wget "https://github.com/ghostty-org/ghostty/archive/refs/tags/${TAG}.tar.gz"
+          wget --quiet "https://github.com/ghostty-org/ghostty/archive/refs/tags/${TAG}.tar.gz"
           tar xzf "${TAG}.tar.gz"
           mv "ghostty-${TAG#v}" ghostty
           echo "Source code extracted successfully"
           ls -la ghostty/
+        env:
+          TAG: ${{ needs.check-tag.outputs.tag }}
 
       - name: Download and extract Zig
         run: |
           echo "Downloading Zig compiler..."
-          wget https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz
-          tar xvf zig-linux-x86_64-0.13.0.tar.xz
+          wget --quiet https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz
+          tar xf zig-linux-x86_64-0.13.0.tar.xz
           echo "Zig compiler extracted successfully"
           ls -la zig-linux-x86_64-0.13.0/
 
@@ -137,30 +145,29 @@ jobs:
           echo "Building Ghostty with ReleaseFast optimization..."
           ../zig-linux-x86_64-0.13.0/zig build -Doptimize=ReleaseFast
           ../zig-linux-x86_64-0.13.0/zig build -Doptimize=ReleaseFast install -p ../install-root
-          
+
           echo "Checking installed files:"
           find ../install-root -type f
 
       - name: Create Debian package structure
         run: |
-          VERSION="${{ needs.check-tag.outputs.version }}"
           UBUNTU_VERSION="${{ matrix.ubuntu }}"
           UBUNTU_VERSION="${UBUNTU_VERSION#ubuntu-}"
-          
+
           echo "Creating package structure for Ubuntu $UBUNTU_VERSION"
-          
+
           mkdir -p debian-package/DEBIAN
           mkdir -p debian-package/usr/bin
           mkdir -p debian-package/usr/share
-          
+
           # Copy binary and application files
           cp -r install-root/bin/* debian-package/usr/bin/
           cp -r install-root/share/* debian-package/usr/share/
-          
+
           # Set correct permissions
           chmod 755 debian-package/usr/bin/ghostty
           chmod 644 debian-package/usr/share/applications/com.mitchellh.ghostty.desktop
-          
+
           # Create control file
           cat > debian-package/DEBIAN/control << EOF
           Package: ghostty
@@ -174,39 +181,42 @@ jobs:
            Ghostty is a fast, feature-rich, and cross-platform terminal emulator
            that uses platform-native UI and GPU acceleration.
           EOF
-          
+
           echo "Package structure created. Contents:"
           find debian-package -type f
+        env:
+          VERSION: ${{ needs.check-tag.outputs.version }}
 
       - name: Build DEB package
         run: |
-          VERSION="${{ needs.check-tag.outputs.version }}"
           UBUNTU_VERSION="${{ matrix.ubuntu }}"
           UBUNTU_VERSION="${UBUNTU_VERSION#ubuntu-}"
-          
+
           echo "Building .deb package for Ubuntu $UBUNTU_VERSION"
           dpkg-deb --build debian-package
-          
+
           # Rename package with Ubuntu version
           echo "Renaming package to include Ubuntu version"
           mv debian-package.deb "ghostty_${VERSION}_ubuntu${UBUNTU_VERSION}_amd64.deb"
-          
+
           echo "Checking final .deb file:"
           ls -l "ghostty_${VERSION}_ubuntu${UBUNTU_VERSION}_amd64.deb"
           dpkg -c "ghostty_${VERSION}_ubuntu${UBUNTU_VERSION}_amd64.deb"
+        env:
+          VERSION: ${{ needs.check-tag.outputs.version }}
 
       - name: Package binary
         run: |
           UBUNTU_VERSION="${{ matrix.ubuntu }}"
           UBUNTU_VERSION="${UBUNTU_VERSION#ubuntu-}"
-          
+
           echo "Creating portable binary archive for Ubuntu $UBUNTU_VERSION"
           mkdir -p release
           cp ghostty/zig-out/bin/ghostty release/
           tar czf "ghostty-linux-x86_64-ubuntu${UBUNTU_VERSION}.tar.gz" -C release .
-          
+
           echo "Checking generated files:"
-          ls -la ghostty-linux-x86_64-ubuntu${UBUNTU_VERSION}.tar.gz
+          ls -la "ghostty-linux-x86_64-ubuntu${UBUNTU_VERSION}.tar.gz"
 
       - name: List files before upload
         run: |
@@ -229,13 +239,15 @@ jobs:
     needs: [check-tag, build-and-package]
     if: needs.check-tag.outputs.should_build == 'true'
     runs-on: ubuntu-latest
-    
+    permissions:
+      contents: write
+
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          
+
       - name: Debug artifact structure
         run: |
           echo "Full directory structure:"
@@ -244,7 +256,7 @@ jobs:
           find artifacts/ -name "*.deb"
           echo "Looking for TAR.GZ files:"
           find artifacts/ -name "*.tar.gz"
-          
+
       - name: Prepare files for release
         run: |
           mkdir -p release
@@ -252,9 +264,9 @@ jobs:
           find artifacts/ -name "*.tar.gz" -exec cp {} release/ \;
           echo "Files ready for release:"
           ls -la release/
-        
+
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
