@@ -46,7 +46,7 @@ tar xzf ghostty-linux-x86_64-ubuntu*.tar.gz
 Note: You'll need the following dependencies installed:
 ```bash
 sudo apt-get update
-sudo apt-get install -y libgtk-4-dev libadwaita-1-dev
+sudo apt-get install -y libgtk-4-dev libgtk4-layer-shell-dev libadwaita-1-dev gettext libxml2-utils pkg-config
 ```
 
 ### Version Compatibility
@@ -59,7 +59,7 @@ If you want to build Ghostty locally:
 1. Install system dependencies:
 ```bash
 sudo apt-get update
-sudo apt-get install -y libgtk-4-dev libadwaita-1-dev git
+sudo apt-get install -y libgtk-4-dev libgtk4-layer-shell-dev libadwaita-1-dev gettext libxml2-utils pkg-config git
 ```
 
 2. Install Zig:

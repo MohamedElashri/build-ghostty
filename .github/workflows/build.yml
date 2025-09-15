@@ -110,7 +110,7 @@ jobs:
         run: |
           echo "Installing dependencies for ${{ matrix.ubuntu }}"
           sudo apt-get update
-          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev git dpkg-dev debhelper
+          sudo apt-get install -y libgtk-4-dev libgtk4-layer-shell-dev libadwaita-1-dev gettext libxml2-utils pkg-config git dpkg-dev debhelper
           echo "Dependencies installed successfully"
 
       - name: Get tagged source code
@@ -168,7 +168,7 @@ jobs:
           Section: utils
           Priority: optional
           Architecture: amd64
-          Depends: libgtk-4-1, libadwaita-1-0
+          Depends: libgtk-4-1, libgtk4-layer-shell0, libadwaita-1-0, libxml2
           Maintainer: Mohamed Elashri <mail@elashri.com>
           Description: Modern Terminal Emulator
            Ghostty is a fast, feature-rich, and cross-platform terminal emulator
