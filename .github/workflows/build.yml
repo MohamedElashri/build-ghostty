@@ -123,20 +123,20 @@ jobs:
           echo "Source code extracted successfully"
           ls -la ghostty/
 
-      - name: Download and extract Zig
+      - name: Download and extract Zig 0.14.1
         run: |
-          echo "Downloading Zig compiler..."
-          wget https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz
-          tar xvf zig-linux-x86_64-0.13.0.tar.xz
+          echo "Downloading Zig compiler 0.14.1..."
+          wget https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz
+          tar xvf zig-x86_64-linux-0.14.1.tar.xz
           echo "Zig compiler extracted successfully"
-          ls -la zig-linux-x86_64-0.13.0/
+          ls -la zig-x86_64-linux-0.14.1/
 
       - name: Build and Install Ghostty
         run: |
           cd ghostty
           echo "Building Ghostty with ReleaseFast optimization..."
-          ../zig-linux-x86_64-0.13.0/zig build -Doptimize=ReleaseFast -fno-sys=gtk4-layer-shell
-          ../zig-linux-x86_64-0.13.0/zig build -Doptimize=ReleaseFast -fno-sys=gtk4-layer-shell install -p ../install-root
+          ../zig-x86_64-linux-0.14.1/zig build -Doptimize=ReleaseFast -fno-sys=gtk4-layer-shell
+          ../zig-x86_64-linux-0.14.1/zig build -Doptimize=ReleaseFast -fno-sys=gtk4-layer-shell install -p ../install-root
           
           echo "Checking installed files:"
           find ../install-root -type f
