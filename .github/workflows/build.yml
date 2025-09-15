@@ -50,17 +50,18 @@ jobs:
             echo "tag=${LATEST_TAG}" >> "$GITHUB_OUTPUT"
           fi
           
-          # Debug output
           echo "Available tags:"
           echo "$UPSTREAM_TAGS"
-          echo "Selected tag: $(cat $GITHUB_OUTPUT)"
+          echo "Selected tag output file:"
+          cat "$GITHUB_OUTPUT"
 
       - name: Set version
         id: version
         run: |
           TAG=${{ steps.get_tag.outputs.tag }}
-          echo "version=${TAG#v}" >> $GITHUB_OUTPUT
-          echo "Version set to: $(cat $GITHUB_OUTPUT)"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "Version set to:"
+          cat "$GITHUB_OUTPUT"
 
       - name: Check if build needed
         id: check_release
@@ -77,9 +78,6 @@ jobs:
           # Check if we have a release for this tag
           TAG_RELEASE=$(echo "$RELEASES" | jq -r ".[] | select(.tag_name==\"$TAG\")")
           
-          # Debug output
-          echo "Checking for existing release with tag: $TAG"
-          
           if [[ -n "${{ github.event.inputs.tag }}" ]]; then
             echo "Manual build requested, will build regardless"
             echo "should_build=true" >> "$GITHUB_OUTPUT"
@@ -91,7 +89,8 @@ jobs:
             echo "should_build=false" >> "$GITHUB_OUTPUT"
           fi
           
-          echo "Final decision: $(cat $GITHUB_OUTPUT)"
+          echo "Decision output file:"
+          cat "$GITHUB_OUTPUT"
 
   build-and-package:
     needs: check-tag
@@ -110,16 +109,18 @@ jobs:
         run: |
           echo "Installing dependencies for ${{ matrix.ubuntu }}"
           sudo apt-get update
-          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev gettext libxml2-utils pkg-config git dpkg-dev debhelper
+          sudo apt-get install -y \
+            libgtk-4-dev libadwaita-1-dev gettext libxml2-utils pkg-config \
+            git dpkg-dev debhelper
           echo "Dependencies installed successfully"
 
-      - name: Get tagged source code
+      - name: Get tagged source code (official source tarball)
         run: |
-          TAG=${{ needs.check-tag.outputs.tag }}
-          echo "Downloading source code for tag: $TAG"
-          wget "https://github.com/ghostty-org/ghostty/archive/refs/tags/${TAG}.tar.gz"
-          tar xzf "${TAG}.tar.gz"
-          mv "ghostty-${TAG#v}" ghostty
+          VERSION="${{ needs.check-tag.outputs.version }}"
+          echo "Downloading Ghostty official source tarball for ${VERSION}"
+          wget "https://release.files.ghostty.org/${VERSION}/ghostty-${VERSION}.tar.gz"
+          tar xzf "ghostty-${VERSION}.tar.gz"
+          mv "ghostty-${VERSION}" ghostty
           echo "Source code extracted successfully"
           ls -la ghostty/
 
@@ -139,7 +140,7 @@ jobs:
           ../zig-x86_64-linux-0.14.1/zig build -Doptimize=ReleaseFast -fno-sys=gtk4-layer-shell install -p ../install-root
           
           echo "Checking installed files:"
-          find ../install-root -type f
+          find ../install-root -type f | sort
 
       - name: Create Debian package structure
         run: |
@@ -176,7 +177,7 @@ jobs:
           EOF
           
           echo "Package structure created. Contents:"
-          find debian-package -type f
+          find debian-package -type f | sort
 
       - name: Build DEB package
         run: |
@@ -206,7 +207,7 @@ jobs:
           tar czf "ghostty-linux-x86_64-ubuntu${UBUNTU_VERSION}.tar.gz" -C release .
           
           echo "Checking generated files:"
-          ls -la ghostty-linux-x86_64-ubuntu${UBUNTU_VERSION}.tar.gz
+          ls -la "ghostty-linux-x86_64-ubuntu${UBUNTU_VERSION}.tar.gz"
 
       - name: List files before upload
         run: |
