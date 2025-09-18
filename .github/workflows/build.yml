@@ -178,16 +178,13 @@ jobs:
           # Zig for SDK (user-level)
           ZIG_FILE="zig-x86_64-linux-${{ env.ZIG_FLATPAK }}.tar.xz"
           curl -fL "https://ziglang.org/download/${{ env.ZIG_FLATPAK }}/${ZIG_FILE}" -o "${ZIG_FILE}"
-
           # gtk4-layer-shell (pick a recent stable)
           LAYERSHELL_VER="1.2.0"
           LAYER_TAR="gtk4-layer-shell-${LAYERSHELL_VER}.tar.gz"
           curl -fL "https://github.com/wmww/gtk4-layer-shell/archive/refs/tags/v${LAYERSHELL_VER}.tar.gz" -o "${LAYER_TAR}"
-
           # Ghostty source from GitHub tag (ensures build.zig is present)
           GHOST_TAR="ghostty-${VERSION}.tar.gz"
           curl -fL "https://github.com/ghostty-org/ghostty/archive/refs/tags/v${VERSION}.tar.gz" -o "${GHOST_TAR}"
-
           ls -lh *.tar* || true
 
       - name: Generate Flatpak manifest
@@ -232,10 +229,8 @@ jobs:
             - name: ghostty
               buildsystem: simple
               build-commands:
-                # Extract and normalize directory name from GitHub tag tarball
-                - DIR=$(tar -tf ghostty-VERSION_REPLACE.tar.gz | head -1 | cut -d/ -f1)
-                - tar -xf ghostty-VERSION_REPLACE.tar.gz
-                - mv "$DIR" ghostty-src
+                - mkdir -p ghostty-src
+                - tar -xf ghostty-VERSION_REPLACE.tar.gz --strip-components=1 -C ghostty-src
                 - cd ghostty-src
                 - /app/zig/zig build -Doptimize=ReleaseFast
                 - /app/zig/zig build -Doptimize=ReleaseFast install -p "${FLATPAK_DEST}"
