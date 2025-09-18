@@ -75,7 +75,7 @@ jobs:
           echo "should_build=$(cat $GITHUB_OUTPUT)"
 
   build-ubuntu-24-04:
-    name: Build .deb on Ubuntu 24.04 (same upstream tag)
+    name: Build .deb on Ubuntu 24.04
     needs: check-tags
     if: needs.check-tags.outputs.should_build == 'true'
     runs-on: ubuntu-24.04
@@ -149,7 +149,7 @@ jobs:
             ghostty-linux-x86_64-ubuntu24.04.tar.gz
 
   build-ubuntu-22-04-flatpak:
-    name: Build Flatpak on Ubuntu 22.04 (same upstream tag)
+    name: Build Flatpak on Ubuntu 22.04
     needs: check-tags
     if: needs.check-tags.outputs.should_build == 'true'
     runs-on: ubuntu-22.04
