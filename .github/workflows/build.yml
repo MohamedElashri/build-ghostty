@@ -160,17 +160,18 @@ jobs:
       - name: Install Flatpak tooling
         run: |
           sudo apt-get update
-          sudo apt-get install -y flatpak flatpak-builder xz-utils curl jq ca-certificates
+          sudo apt-get install -y flatpak flatpak-builder bubblewrap xz-utils curl jq ca-certificates
 
-      - name: Enable Flathub
+      - name: Enable Flathub (user installation)
         run: |
           flatpak --version
-          flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak remotes --user
 
       - name: Pre-fetch sources (Zig, gtk4-layer-shell, Ghostty tarball)
         run: |
           set -euo pipefail
-          # Zig for SDK
+          # Zig for SDK (user-level)
           ZIG_FILE="zig-x86_64-linux-${{ env.ZIG_FLATPAK }}.tar.xz"
           curl -fL "https://ziglang.org/download/${{ env.ZIG_FLATPAK }}/${ZIG_FILE}" -o "${ZIG_FILE}"
           # gtk4-layer-shell (pick a recent stable)
@@ -239,10 +240,10 @@ jobs:
           echo "----- org.ghostty.Ghostty.yml -----"
           sed -n '1,200p' org.ghostty.Ghostty.yml
 
-      - name: Build Flatpak (repo export)
+      - name: Build Flatpak (user installation; auto-install deps from Flathub)
         run: |
           rm -rf build-dir repo
-          flatpak-builder --force-clean --install-deps-from=flathub --repo=repo build-dir org.ghostty.Ghostty.yml
+          flatpak-builder --user --force-clean --install-deps-from=flathub --repo=repo build-dir org.ghostty.Ghostty.yml
 
       - name: Create single-file Flatpak bundle
         run: |
