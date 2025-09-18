@@ -2,264 +2,284 @@ name: Build and Release Ghostty
 
 on:
   schedule:
-    # Check for new tags every 6 hours
-    - cron: '0 */6 * * *'
+    - cron: "0 */6 * * *"   # check every 6 hours
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Specific tag to build (e.g., v1.0.1, leave empty for latest)'
+        description: "Specific upstream tag to build (e.g., v1.2.3). Leave empty for latest."
         required: false
-        default: ''
+        default: ""
         type: string
 
 permissions:
   contents: write
 
+env:
+  ZIG_24_04: "0.14.1"   # Zig used for native 24.04 build
+  ZIG_FLATPAK: "0.14.1" # Zig injected into Flatpak SDK on 22.04
+  GNOME_RUNTIME: "46"   # Flatpak runtime branch (has libadwaita >= 1.5)
+
 jobs:
-  check-tag:
+  check-tags:
     runs-on: ubuntu-latest
     outputs:
-      tag: ${{ steps.get_tag.outputs.tag }}
-      version: ${{ steps.version.outputs.version }}
-      should_build: ${{ steps.check_release.outputs.should_build }}
-    
+      tag: ${{ steps.compute.outputs.tag }}
+      version: ${{ steps.compute.outputs.version }}
+      should_build: ${{ steps.decide.outputs.should_build }}
     steps:
-      - name: Get latest valid version tag
-        id: get_tag
+      - name: Compute tag and version
+        id: compute
+        shell: bash
         run: |
-          # Get all tags and filter only v*.*.* tags, excluding 'tip'
-          UPSTREAM_TAGS=$(curl -s https://api.github.com/repos/ghostty-org/ghostty/tags | \
-            grep '"name":' | \
-            grep -o '"v[0-9][^"]*"' | \
-            tr -d '"')
-          
+          set -euo pipefail
+          TAGS=$(curl -fsSL 'https://api.github.com/repos/ghostty-org/ghostty/tags?per_page=200' \
+            | grep '"name":' | grep -o '"v[0-9][^"]*"' | tr -d '"' | sort -V)
           if [[ -n "${{ github.event.inputs.tag }}" ]]; then
-            # For manual tag input, check if it exists
-            TAG="${{ github.event.inputs.tag }}"
-            if echo "$UPSTREAM_TAGS" | grep -q "^${TAG}$"; then
-              echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+            if echo "$TAGS" | grep -qx "${{ github.event.inputs.tag }}"; then
+              TAG="${{ github.event.inputs.tag }}"
             else
-              echo "Error: Tag ${TAG} not found in upstream repository"
-              echo "Available tags:"
-              echo "$UPSTREAM_TAGS"
+              echo "Requested tag not found. Available:" >&2
+              echo "$TAGS" >&2
               exit 1
             fi
           else
-            # Get latest version tag
-            LATEST_TAG=$(echo "$UPSTREAM_TAGS" | sort -V | tail -n1)
-            echo "tag=${LATEST_TAG}" >> "$GITHUB_OUTPUT"
+            TAG=$(echo "$TAGS" | tail -n1)
           fi
-          
-          echo "Available tags:"
-          echo "$UPSTREAM_TAGS"
-          echo "Selected tag output file:"
-          cat "$GITHUB_OUTPUT"
+          VER="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "Selected tag: $TAG"
+          echo "Version: $VER"
 
-      - name: Set version
-        id: version
-        run: |
-          TAG=${{ steps.get_tag.outputs.tag }}
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
-          echo "Version set to:"
-          cat "$GITHUB_OUTPUT"
-
-      - name: Check if build needed
-        id: check_release
+      - name: Decide build (skip if release already exists unless manual)
+        id: decide
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
         run: |
-          TAG=${{ steps.get_tag.outputs.tag }}
-          echo "Checking if build needed for tag: $TAG"
-          
-          # Get all releases from this repository
-          RELEASES=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
-            "https://api.github.com/repos/$GITHUB_REPOSITORY/releases")
-          
-          # Check if we have a release for this tag
-          TAG_RELEASE=$(echo "$RELEASES" | jq -r ".[] | select(.tag_name==\"$TAG\")")
-          
+          set -euo pipefail
+          TAG='${{ steps.compute.outputs.tag }}'
+          # manual dispatch always builds
           if [[ -n "${{ github.event.inputs.tag }}" ]]; then
-            echo "Manual build requested, will build regardless"
             echo "should_build=true" >> "$GITHUB_OUTPUT"
-          elif [[ -z "$TAG_RELEASE" ]]; then
-            echo "No release found for tag $TAG, will build"
-            echo "should_build=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "Release already exists for tag $TAG, skipping build"
-            echo "should_build=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
-          
-          echo "Decision output file:"
-          cat "$GITHUB_OUTPUT"
+          code=$(curl -s -o /dev/null -w '%{http_code}' \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/${TAG}")
+          if [[ "$code" == "200" ]]; then
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "should_build=$(cat $GITHUB_OUTPUT)"
 
-  build-and-package:
-    needs: check-tag
-    if: needs.check-tag.outputs.should_build == 'true'
-    runs-on: ${{ matrix.ubuntu }}
-    strategy:
-      matrix:
-        ubuntu: [ubuntu-22.04, ubuntu-24.04]
-      fail-fast: false
-
+  build-ubuntu-24-04:
+    name: Build .deb on Ubuntu 24.04 (same upstream tag)
+    needs: check-tags
+    if: needs.check-tags.outputs.should_build == 'true'
+    runs-on: ubuntu-24.04
+    env:
+      TAG: ${{ needs.check-tags.outputs.tag }}
+      VERSION: ${{ needs.check-tags.outputs.version }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install system dependencies
+      - name: Tooling and headers
         run: |
-          echo "Installing dependencies for ${{ matrix.ubuntu }}"
           sudo apt-get update
           sudo apt-get install -y \
-            libgtk-4-dev libadwaita-1-dev gettext libxml2-utils pkg-config \
-            git dpkg-dev debhelper
-          echo "Dependencies installed successfully"
+            curl wget xz-utils pkg-config gettext libxml2-utils git dpkg-dev debhelper \
+            libgtk-4-dev libadwaita-1-dev
 
-      - name: Get tagged source code (official source tarball)
+      - name: Fetch Ghostty source (official tarball)
         run: |
-          VERSION="${{ needs.check-tag.outputs.version }}"
-          echo "Downloading Ghostty official source tarball for ${VERSION}"
-          wget "https://release.files.ghostty.org/${VERSION}/ghostty-${VERSION}.tar.gz"
-          tar xzf "ghostty-${VERSION}.tar.gz"
+          curl -fL "https://release.files.ghostty.org/${VERSION}/ghostty-${VERSION}.tar.gz" -o "ghostty-${VERSION}.tar.gz"
+          tar -xf "ghostty-${VERSION}.tar.gz"
           mv "ghostty-${VERSION}" ghostty
-          echo "Source code extracted successfully"
-          ls -la ghostty/
 
-      - name: Download and extract Zig 0.14.1
+      - name: Download Zig ${{ env.ZIG_24_04 }}
         run: |
-          echo "Downloading Zig compiler 0.14.1..."
-          wget https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz
-          tar xvf zig-x86_64-linux-0.14.1.tar.xz
-          echo "Zig compiler extracted successfully"
-          ls -la zig-x86_64-linux-0.14.1/
+          F="zig-x86_64-linux-${{ env.ZIG_24_04 }}.tar.xz"
+          curl -fL "https://ziglang.org/download/${{ env.ZIG_24_04 }}/${F}" -o "$F"
+          tar -xf "$F"
+          mv "zig-x86_64-linux-${{ env.ZIG_24_04 }}" zig
+          ./zig/zig version
 
-      - name: Build and Install Ghostty
+      - name: Build + stage install
         run: |
           cd ghostty
-          echo "Building Ghostty with ReleaseFast optimization..."
-          ../zig-x86_64-linux-0.14.1/zig build -Doptimize=ReleaseFast -fno-sys=gtk4-layer-shell
-          ../zig-x86_64-linux-0.14.1/zig build -Doptimize=ReleaseFast -fno-sys=gtk4-layer-shell install -p ../install-root
-          
-          echo "Checking installed files:"
-          find ../install-root -type f | sort
+          ../zig/zig build -Doptimize=ReleaseFast -fno-sys=gtk4-layer-shell
+          ../zig/zig build -Doptimize=ReleaseFast -fno-sys=gtk4-layer-shell install -p ../install-root
+          cd ..
+          find install-root -maxdepth 3 -type f -print
 
-      - name: Create Debian package structure
+      - name: Package .deb (24.04)
         run: |
-          VERSION="${{ needs.check-tag.outputs.version }}"
-          UBUNTU_VERSION="${{ matrix.ubuntu }}"
-          UBUNTU_VERSION="${UBUNTU_VERSION#ubuntu-}"
-          
-          echo "Creating package structure for Ubuntu $UBUNTU_VERSION"
-          
-          mkdir -p debian-package/DEBIAN
-          mkdir -p debian-package/usr/bin
-          mkdir -p debian-package/usr/share
-          
-          # Copy binary and application files
+          mkdir -p debian-package/DEBIAN debian-package/usr/bin debian-package/usr/share
           cp -r install-root/bin/* debian-package/usr/bin/
-          cp -r install-root/share/* debian-package/usr/share/
-          
-          # Set correct permissions
-          chmod 755 debian-package/usr/bin/ghostty
-          chmod 644 debian-package/usr/share/applications/com.mitchellh.ghostty.desktop
-          
-          # Create control file
-          cat > debian-package/DEBIAN/control << EOF
+          cp -r install-root/share/* debian-package/usr/share/ || true
+          chmod 755 debian-package/usr/bin/ghostty || true
+          test -f debian-package/usr/share/applications/com.mitchellh.ghostty.desktop && chmod 644 debian-package/usr/share/applications/com.mitchellh.ghostty.desktop || true
+          cat > debian-package/DEBIAN/control <<EOF
           Package: ghostty
           Version: ${VERSION}
           Section: utils
           Priority: optional
           Architecture: amd64
-          Depends: libgtk-4-1, libgtk4-layer-shell0, libadwaita-1-0, libxml2
+          Depends: libgtk-4-1, libadwaita-1-0, libxml2
           Maintainer: Mohamed Elashri <mail@elashri.com>
           Description: Modern Terminal Emulator
            Ghostty is a fast, feature-rich, and cross-platform terminal emulator
            that uses platform-native UI and GPU acceleration.
           EOF
-          
-          echo "Package structure created. Contents:"
-          find debian-package -type f | sort
-
-      - name: Build DEB package
-        run: |
-          VERSION="${{ needs.check-tag.outputs.version }}"
-          UBUNTU_VERSION="${{ matrix.ubuntu }}"
-          UBUNTU_VERSION="${UBUNTU_VERSION#ubuntu-}"
-          
-          echo "Building .deb package for Ubuntu $UBUNTU_VERSION"
           dpkg-deb --build debian-package
-          
-          # Rename package with Ubuntu version
-          echo "Renaming package to include Ubuntu version"
-          mv debian-package.deb "ghostty_${VERSION}_ubuntu${UBUNTU_VERSION}_amd64.deb"
-          
-          echo "Checking final .deb file:"
-          ls -l "ghostty_${VERSION}_ubuntu${UBUNTU_VERSION}_amd64.deb"
-          dpkg -c "ghostty_${VERSION}_ubuntu${UBUNTU_VERSION}_amd64.deb"
+          mv debian-package.deb "ghostty_${VERSION}_ubuntu24.04_amd64.deb"
 
-      - name: Package binary
+      - name: Portable tarball (24.04)
         run: |
-          UBUNTU_VERSION="${{ matrix.ubuntu }}"
-          UBUNTU_VERSION="${UBUNTU_VERSION#ubuntu-}"
-          
-          echo "Creating portable binary archive for Ubuntu $UBUNTU_VERSION"
           mkdir -p release
           cp ghostty/zig-out/bin/ghostty release/
-          tar czf "ghostty-linux-x86_64-ubuntu${UBUNTU_VERSION}.tar.gz" -C release .
-          
-          echo "Checking generated files:"
-          ls -la "ghostty-linux-x86_64-ubuntu${UBUNTU_VERSION}.tar.gz"
+          tar czf "ghostty-linux-x86_64-ubuntu24.04.tar.gz" -C release .
 
-      - name: List files before upload
-        run: |
-          echo "Current directory contents:"
-          ls -R
-          echo "Looking for DEB file:"
-          find . -name "ghostty_*.deb"
-          echo "Looking for TAR file:"
-          find . -name "ghostty-linux-x86_64-*.tar.gz"
-
-      - name: Upload artifacts
+      - name: Upload artifacts (24.04)
         uses: actions/upload-artifact@v4
         with:
-          name: ghostty-${{ matrix.ubuntu }}
+          name: ghostty-ubuntu-24.04
           path: |
-            ghostty_*.deb
-            ghostty-linux-x86_64-*.tar.gz
+            ghostty_${{ env.VERSION }}_ubuntu24.04_amd64.deb
+            ghostty-linux-x86_64-ubuntu24.04.tar.gz
+
+  build-ubuntu-22-04-flatpak:
+    name: Build Flatpak on Ubuntu 22.04 (same upstream tag)
+    needs: check-tags
+    if: needs.check-tags.outputs.should_build == 'true'
+    runs-on: ubuntu-22.04
+    env:
+      TAG: ${{ needs.check-tags.outputs.tag }}
+      VERSION: ${{ needs.check-tags.outputs.version }}
+    steps:
+      - name: Install Flatpak tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder xz-utils curl jq ca-certificates
+
+      - name: Enable Flathub
+        run: |
+          flatpak --version
+          flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+
+      - name: Pre-fetch sources (Zig, gtk4-layer-shell, Ghostty tarball)
+        run: |
+          set -euo pipefail
+          # Zig for SDK
+          ZIG_FILE="zig-x86_64-linux-${{ env.ZIG_FLATPAK }}.tar.xz"
+          curl -fL "https://ziglang.org/download/${{ env.ZIG_FLATPAK }}/${ZIG_FILE}" -o "${ZIG_FILE}"
+          # gtk4-layer-shell (pick a recent stable)
+          LAYERSHELL_VER="1.2.0"
+          LAYER_TAR="gtk4-layer-shell-${LAYERSHELL_VER}.tar.gz"
+          curl -fL "https://github.com/wmww/gtk4-layer-shell/archive/refs/tags/v${LAYERSHELL_VER}.tar.gz" -o "${LAYER_TAR}"
+          # Ghostty official source tarball
+          GHOST_TAR="ghostty-${VERSION}.tar.gz"
+          curl -fL "https://release.files.ghostty.org/${VERSION}/${GHOST_TAR}" -o "${GHOST_TAR}"
+          ls -lh *.tar* || true
+
+      - name: Generate Flatpak manifest
+        run: |
+          cat > org.ghostty.Ghostty.yml <<'YAML'
+          id: org.ghostty.Ghostty
+          runtime: org.gnome.Platform
+          runtime-version: GNOME_RUNTIME_REPLACE
+          sdk: org.gnome.Sdk
+          command: ghostty
+          finish-args:
+            - --share=ipc
+            - --socket=wayland
+            - --socket=fallback-x11
+            - --device=dri
+            - --filesystem=home
+            - --env=TERM=xterm-256color
+          modules:
+            - name: zig
+              buildsystem: simple
+              build-commands:
+                - mkdir -p /app/zig
+                - tar -xf zig-x86_64-linux-ZIG_VERSION_REPLACE.tar.xz
+                - cp -r zig-*-linux-ZIG_VERSION_REPLACE/zig /app/zig/
+                - cp -r zig-*-linux-ZIG_VERSION_REPLACE/lib /app/zig/
+                - /app/zig/zig version
+              sources:
+                - type: file
+                  path: zig-x86_64-linux-ZIG_VERSION_REPLACE.tar.xz
+
+            - name: gtk4-layer-shell
+              buildsystem: simple
+              build-commands:
+                - tar -xf gtk4-layer-shell-LAYER_VER_REPLACE.tar.gz
+                - cd gtk4-layer-shell-LAYER_VER_REPLACE && meson setup _build --prefix=/app
+                - cd gtk4-layer-shell-LAYER_VER_REPLACE && ninja -C _build
+                - cd gtk4-layer-shell-LAYER_VER_REPLACE && ninja -C _build install
+              sources:
+                - type: file
+                  path: gtk4-layer-shell-LAYER_VER_REPLACE.tar.gz
+
+            - name: ghostty
+              buildsystem: simple
+              build-commands:
+                - tar -xf ghostty-VERSION_REPLACE.tar.gz
+                - cd ghostty-VERSION_REPLACE
+                - /app/zig/zig build -Doptimize=ReleaseFast
+                - /app/zig/zig build -Doptimize=ReleaseFast install -p "${FLATPAK_DEST}"
+              sources:
+                - type: file
+                  path: ghostty-VERSION_REPLACE.tar.gz
+          YAML
+          sed -i "s/GNOME_RUNTIME_REPLACE/${{ env.GNOME_RUNTIME }}/" org.ghostty.Ghostty.yml
+          sed -i "s/ZIG_VERSION_REPLACE/${{ env.ZIG_FLATPAK }}/g" org.ghostty.Ghostty.yml
+          sed -i "s/LAYER_VER_REPLACE/1.2.0/g" org.ghostty.Ghostty.yml
+          sed -i "s/VERSION_REPLACE/${{ env.VERSION }}/g" org.ghostty.Ghostty.yml
+          echo "----- org.ghostty.Ghostty.yml -----"
+          sed -n '1,200p' org.ghostty.Ghostty.yml
+
+      - name: Build Flatpak (repo export)
+        run: |
+          rm -rf build-dir repo
+          flatpak-builder --force-clean --install-deps-from=flathub --repo=repo build-dir org.ghostty.Ghostty.yml
+
+      - name: Create single-file Flatpak bundle
+        run: |
+          flatpak build-bundle repo "ghostty_${{ env.VERSION }}_gnome${{ env.GNOME_RUNTIME }}_x86_64.flatpak" org.ghostty.Ghostty ${{ env.GNOME_RUNTIME }}
+          ls -lh "ghostty_${{ env.VERSION }}_gnome${{ env.GNOME_RUNTIME }}_x86_64.flatpak"
+
+      - name: Upload Flatpak artifact (22.04)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghostty-flatpak-ubuntu-22.04
+          path: ghostty_${{ env.VERSION }}_gnome${{ env.GNOME_RUNTIME }}_x86_64.flatpak
 
   create-release:
-    needs: [check-tag, build-and-package]
-    if: needs.check-tag.outputs.should_build == 'true'
+    needs: [check-tags, build-ubuntu-24-04, build-ubuntu-22-04-flatpak]
+    if: needs.check-tags.outputs.should_build == 'true'
     runs-on: ubuntu-latest
-    
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          
-      - name: Debug artifact structure
-        run: |
-          echo "Full directory structure:"
-          ls -R artifacts/
-          echo "Looking for DEB files:"
-          find artifacts/ -name "*.deb"
-          echo "Looking for TAR.GZ files:"
-          find artifacts/ -name "*.tar.gz"
-          
+
       - name: Prepare files for release
         run: |
           mkdir -p release
-          find artifacts/ -name "*.deb" -exec cp {} release/ \;
-          find artifacts/ -name "*.tar.gz" -exec cp {} release/ \;
-          echo "Files ready for release:"
+          find artifacts -type f -name "*.deb" -exec cp {} release/ \;
+          find artifacts -type f -name "*.tar.gz" -exec cp {} release/ \;
+          find artifacts -type f -name "*.flatpak" -exec cp {} release/ \;
+          echo "Prepared artifacts:"
           ls -la release/
-        
-      - name: Create Release
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ needs.check-tag.outputs.tag }}
+          tag_name: ${{ needs.check-tags.outputs.tag }}
           files: release/*
           draft: false
           prerelease: false
