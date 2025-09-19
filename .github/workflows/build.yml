@@ -17,7 +17,7 @@ permissions:
 env:
   ZIG_24_04: "0.14.1"    # Zig used for native 24.04 build
   ZIG_FLATPAK: "0.14.1"  # Zig injected into Flatpak SDK on 22.04
-  GNOME_RUNTIME: "46"    # Flatpak runtime branch (has libadwaita >= 1.5)
+  GNOME_RUNTIME: "48"    # Use a supported GNOME runtime (47/48 are supported; 46 is EOL)
 
 jobs:
   check-tags:
@@ -73,7 +73,7 @@ jobs:
           fi
 
   build-ubuntu-24-04:
-    name: Build .deb on Ubuntu 24.04 (same upstream tag)
+    name: Build .deb on Ubuntu 24.04
     needs: check-tags
     if: needs.check-tags.outputs.should_build == 'true'
     runs-on: ubuntu-24.04
@@ -147,7 +147,7 @@ jobs:
             ghostty-linux-x86_64-ubuntu24.04.tar.gz
 
   build-ubuntu-22-04-flatpak:
-    name: Build Flatpak on Ubuntu 22.04 (same upstream tag)
+    name: Build Flatpak on Ubuntu 22.04
     needs: check-tags
     if: needs.check-tags.outputs.should_build == 'true'
     runs-on: ubuntu-22.04
@@ -166,7 +166,7 @@ jobs:
           flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
           flatpak remotes --user
 
-      - name: Install GNOME runtime + SDK (user)
+      - name: Install GNOME runtime + SDK (user; supported version)
         run: |
           flatpak --user install -y flathub org.gnome.Platform//${{ env.GNOME_RUNTIME }}
           flatpak --user install -y flathub org.gnome.Sdk//${{ env.GNOME_RUNTIME }}
@@ -175,14 +175,12 @@ jobs:
       - name: Pre-fetch sources (Zig, gtk4-layer-shell, Ghostty tarball)
         run: |
           set -euo pipefail
-          # Zig for SDK (user-level)
           ZIG_FILE="zig-x86_64-linux-${{ env.ZIG_FLATPAK }}.tar.xz"
           curl -fL "https://ziglang.org/download/${{ env.ZIG_FLATPAK }}/${ZIG_FILE}" -o "${ZIG_FILE}"
-          # gtk4-layer-shell (pick a recent stable)
           LAYERSHELL_VER="1.2.0"
           LAYER_TAR="gtk4-layer-shell-${LAYERSHELL_VER}.tar.gz"
           curl -fL "https://github.com/wmww/gtk4-layer-shell/archive/refs/tags/v${LAYERSHELL_VER}.tar.gz" -o "${LAYER_TAR}"
-          # Ghostty source from GitHub tag (ensures build.zig is present)
+          # Use GitHub tag tarball here so build.zig is guaranteed present
           GHOST_TAR="ghostty-${VERSION}.tar.gz"
           curl -fL "https://github.com/ghostty-org/ghostty/archive/refs/tags/v${VERSION}.tar.gz" -o "${GHOST_TAR}"
           ls -lh *.tar* || true
