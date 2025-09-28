@@ -16,8 +16,6 @@ permissions:
 
 env:
   ZIG_24_04: "0.14.1"    # Zig used for native 24.04 build
-  ZIG_FLATPAK: "0.14.1"  # Zig injected into Flatpak SDK on 22.04
-  GNOME_RUNTIME: "48"    # Use a supported GNOME runtime (47/48 are supported; 46 is EOL)
 
 jobs:
   check-tags:
@@ -146,127 +144,15 @@ jobs:
             ghostty_${{ env.VERSION }}_ubuntu24.04_amd64.deb
             ghostty-linux-x86_64-ubuntu24.04.tar.gz
 
-  build-ubuntu-22-04-flatpak:
-    name: Build Flatpak on Ubuntu 22.04
-    needs: check-tags
-    if: needs.check-tags.outputs.should_build == 'true'
-    runs-on: ubuntu-22.04
-    env:
-      TAG: ${{ needs.check-tags.outputs.tag }}
-      VERSION: ${{ needs.check-tags.outputs.version }}
-    steps:
-      - name: Install Flatpak tooling
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y flatpak flatpak-builder bubblewrap xz-utils curl jq ca-certificates
-
-      - name: Enable Flathub (user installation)
-        run: |
-          flatpak --version
-          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-          flatpak remotes --user
-
-      - name: Install GNOME runtime + SDK (user; supported version)
-        run: |
-          flatpak --user install -y flathub org.gnome.Platform//${{ env.GNOME_RUNTIME }}
-          flatpak --user install -y flathub org.gnome.Sdk//${{ env.GNOME_RUNTIME }}
-          flatpak list --user
-
-      - name: Pre-fetch sources (Zig, gtk4-layer-shell, Ghostty tarball)
-        run: |
-          set -euo pipefail
-          ZIG_FILE="zig-x86_64-linux-${{ env.ZIG_FLATPAK }}.tar.xz"
-          curl -fL "https://ziglang.org/download/${{ env.ZIG_FLATPAK }}/${ZIG_FILE}" -o "${ZIG_FILE}"
-          LAYERSHELL_VER="1.2.0"
-          LAYER_TAR="gtk4-layer-shell-${LAYERSHELL_VER}.tar.gz"
-          curl -fL "https://github.com/wmww/gtk4-layer-shell/archive/refs/tags/v${LAYERSHELL_VER}.tar.gz" -o "${LAYER_TAR}"
-          # Use GitHub tag tarball here so build.zig is guaranteed present
-          GHOST_TAR="ghostty-${VERSION}.tar.gz"
-          curl -fL "https://github.com/ghostty-org/ghostty/archive/refs/tags/v${VERSION}.tar.gz" -o "${GHOST_TAR}"
-          ls -lh *.tar* || true
-
-      - name: Generate Flatpak manifest
-        run: |
-          cat > org.ghostty.Ghostty.yml <<'YAML'
-          id: org.ghostty.Ghostty
-          runtime: org.gnome.Platform
-          runtime-version: "GNOME_RUNTIME_REPLACE"
-          sdk: org.gnome.Sdk
-          command: ghostty
-          finish-args:
-            - --share=ipc
-            - --socket=wayland
-            - --socket=fallback-x11
-            - --device=dri
-            - --filesystem=home
-            - --env=TERM=xterm-256color
-          modules:
-            - name: zig
-              buildsystem: simple
-              build-commands:
-                - mkdir -p /app/zig
-                - tar -xf zig-x86_64-linux-ZIG_VERSION_REPLACE.tar.xz
-                - cp -r zig-*-linux-ZIG_VERSION_REPLACE/zig /app/zig/
-                - cp -r zig-*-linux-ZIG_VERSION_REPLACE/lib /app/zig/
-                - /app/zig/zig version
-              sources:
-                - type: file
-                  path: zig-x86_64-linux-ZIG_VERSION_REPLACE.tar.xz
-
-            - name: gtk4-layer-shell
-              buildsystem: simple
-              build-commands:
-                - tar -xf gtk4-layer-shell-LAYER_VER_REPLACE.tar.gz
-                - cd gtk4-layer-shell-LAYER_VER_REPLACE && meson setup _build --prefix=/app
-                - cd gtk4-layer-shell-LAYER_VER_REPLACE && ninja -C _build
-                - cd gtk4-layer-shell-LAYER_VER_REPLACE && ninja -C _build install
-              sources:
-                - type: file
-                  path: gtk4-layer-shell-LAYER_VER_REPLACE.tar.gz
-
-            - name: ghostty
-              buildsystem: simple
-              build-commands:
-                - mkdir -p ghostty-src
-                - tar -xf ghostty-VERSION_REPLACE.tar.gz --strip-components=1 -C ghostty-src
-                - cd ghostty-src
-                - /app/zig/zig build -Doptimize=ReleaseFast
-                - /app/zig/zig build -Doptimize=ReleaseFast install -p "${FLATPAK_DEST}"
-              sources:
-                - type: file
-                  path: ghostty-VERSION_REPLACE.tar.gz
-          YAML
-          sed -i "s/GNOME_RUNTIME_REPLACE/${{ env.GNOME_RUNTIME }}/" org.ghostty.Ghostty.yml
-          sed -i "s/ZIG_VERSION_REPLACE/${{ env.ZIG_FLATPAK }}/g" org.ghostty.Ghostty.yml
-          sed -i "s/LAYER_VER_REPLACE/1.2.0/g" org.ghostty.Ghostty.yml
-          sed -i "s/VERSION_REPLACE/${{ env.VERSION }}/g" org.ghostty.Ghostty.yml
-          echo "----- org.ghostty.Ghostty.yml -----"
-          sed -n '1,240p' org.ghostty.Ghostty.yml
-
-      - name: Build Flatpak (user; install deps from Flathub)
-        run: |
-          rm -rf build-dir repo
-          flatpak-builder --user --force-clean --install-deps-from=flathub --repo=repo build-dir org.ghostty.Ghostty.yml
-
-      - name: Create single-file Flatpak bundle
-        run: |
-          flatpak build-bundle repo "ghostty_${{ env.VERSION }}_gnome${{ env.GNOME_RUNTIME }}_x86_64.flatpak" org.ghostty.Ghostty ${{ env.GNOME_RUNTIME }}
-          ls -lh "ghostty_${{ env.VERSION }}_gnome${{ env.GNOME_RUNTIME }}_x86_64.flatpak"
-
-      - name: Upload Flatpak artifact (22.04)
-        uses: actions/upload-artifact@v4
-        with:
-          name: ghostty-flatpak-ubuntu-22.04
-          path: ghostty_${{ env.VERSION }}_gnome${{ env.GNOME_RUNTIME }}_x86_64.flatpak
-
   create-release:
-    needs: [check-tags, build-ubuntu-24-04, build-ubuntu-22-04-flatpak]
+    needs: [check-tags, build-ubuntu-24-04]
     if: needs.check-tags.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Download all artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
+          name: ghostty-ubuntu-24.04
           path: artifacts
 
       - name: Prepare files for release
@@ -274,7 +160,6 @@ jobs:
           mkdir -p release
           find artifacts -type f -name "*.deb" -exec cp {} release/ \;
           find artifacts -type f -name "*.tar.gz" -exec cp {} release/ \;
-          find artifacts -type f -name "*.flatpak" -exec cp {} release/ \;
           echo "Prepared artifacts:"
           ls -la release/
 
