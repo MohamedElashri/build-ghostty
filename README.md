@@ -49,10 +49,6 @@ sudo apt-get update
 sudo apt-get install -y libgtk-4-dev libgtk4-layer-shell-dev libadwaita-1-dev gettext libxml2-utils pkg-config
 ```
 
-### Version Compatibility
-- Ubuntu 22.04 package: Compatible with Ubuntu 22.04 and similar distributions with equivalent GLIBC versions
-- Ubuntu 24.04 package: Compatible with Ubuntu 24.04 and similar distributions with equivalent GLIBC versions
-
 ## Building Manually
 If you want to build Ghostty locally:
 
