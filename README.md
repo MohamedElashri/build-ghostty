@@ -10,12 +10,6 @@ This repository contains automation for building and releasing [Ghostty](https:/
 ### Method 1: Debian Package (Recommended for Debian/Ubuntu-based systems)
 Download the appropriate .deb package for your Ubuntu version from the releases page:
 
-- For Ubuntu 22.04:
-```bash
-sudo dpkg -i ghostty_<version>_ubuntu22.04_amd64.deb
-sudo apt-get install -f  # Install any missing dependencies
-```
-
 - For Ubuntu 24.04:
 ```bash
 sudo dpkg -i ghostty_<version>_ubuntu24.04_amd64.deb
@@ -29,8 +23,7 @@ After installation, you can:
 ### Method 2: Portable Binary
 If you prefer to run the portable version of Ghostty:
 
-1. Download the appropriate version for your Ubuntu release from the releases page:
-   - `ghostty-linux-x86_64-ubuntu22.04.tar.gz` for Ubuntu 22.04
+1. Download the `.deb` file  from the releases page:
    - `ghostty-linux-x86_64-ubuntu24.04.tar.gz` for Ubuntu 24.04
 
 2. Extract the archive:
@@ -79,7 +72,6 @@ cd ghostty
 ## Automated Builds
 This repository automatically:
 - Checks for new Ghostty releases every 6 hours
-- Builds packages for `Ubuntu 22.04` and `Ubuntu 24.04`
 - Creates GitHub releases with version-specific packages
 - Generates both .deb packages and portable binaries
 
