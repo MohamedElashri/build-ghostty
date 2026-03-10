@@ -15,7 +15,7 @@ permissions:
   contents: write
 
 env:
-  ZIG_24_04: "0.14.1"    # Zig used for native 24.04 build
+  ZIG_24_04: "0.15.0"  
 
 jobs:
   check-tags:
