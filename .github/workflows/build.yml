@@ -15,7 +15,7 @@ permissions:
   contents: write
 
 env:
-  ZIG_24_04: "0.15.0"  
+  ZIG_24_04: "0.15.2"  
 
 jobs:
   check-tags:
